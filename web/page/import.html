@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>UEJAVA 智能体 - 文档导入</title>
+  <style>
+    :root{--bg:#1a1d23;--panel:#22252d;--text:#e0e0e0;--muted:#8890a0;--brand:#4e8cff;--border:#333840;--green:#4caf84;--red:#e0556a;--orange:#e8a855;--blue:#4e8cff;}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;justify-content:center;padding:40px 20px}
+    .container{max-width:800px;width:100%}
+    h1{font-size:24px;margin-bottom:8px}
+    .sub{color:var(--muted);font-size:14px;margin-bottom:32px}
+    .drop-zone{border:2px dashed var(--border);border-radius:12px;padding:60px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--panel)}
+    .drop-zone:hover,.drop-zone.dragover{border-color:var(--brand);background:#252a35}
+    .drop-zone .icon{font-size:48px;margin-bottom:12px}
+    .drop-zone p{margin:4px 0;color:var(--muted)}
+    .drop-zone .hint{font-size:13px}
+    input[type=file]{display:none}
+    .task-list{margin-top:24px}
+    .task-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:16px}
+    .task-card .name{flex:1;font-size:14px;word-break:break-all}
+    .badge{font-size:12px;padding:3px 10px;border-radius:12px;white-space:nowrap}
+    .badge.uploading{background:var(--orange);color:#fff}
+    .badge.processing{background:var(--blue);color:#fff}
+    .badge.completed{background:var(--green);color:#fff}
+    .badge.failed{background:var(--red);color:#fff}
+    .progress-bar{width:120px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+    .progress-bar .fill{height:100%;background:var(--brand);transition:width .3s}
+    .logs{margin-top:8px;font-size:12px;color:var(--muted);max-height:120px;overflow-y:auto;background:#1a1d23;padding:8px;border-radius:4px;display:none}
+    .log-item{display:flex;align-items:center;gap:6px;padding:2px 0}
+    .log-item .done{color:var(--green)}.log-item .running{color:var(--orange)}
+    .nav{display:flex;gap:12px;margin-bottom:32px}
+    .nav a{color:var(--brand);text-decoration:none;font-size:14px;padding:8px 16px;border-radius:6px;border:1px solid var(--border)}
+    .nav a:hover{background:var(--panel)}
+    .nav a.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="nav">
+    <a href="import.html" class="active">📥 文档导入</a>
+    <a href="chat.html">💬 AI 问答</a>
+  </div>
+  <h1>📥 知识库文档导入</h1>
+  <p class="sub">上传电力设施相关技术文档（PDF/Markdown），系统将自动解析、向量化并存入知识库</p>
+
+  <div class="drop-zone" id="dropZone">
+    <div class="icon">📄</div>
+    <p>拖拽文件到此处，或点击选择</p>
+    <p class="hint">支持 PDF 和 Markdown (.md) 格式</p>
+    <input type="file" id="fileInput" multiple accept=".pdf,.md" />
+  </div>
+
+  <div class="task-list" id="taskList"></div>
+</div>
+
+<script>
+const UPLOAD_URL = '/upload';
+const STATUS_URL = '/status/';
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const taskList = document.getElementById('taskList');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+function handleFiles(files) {
+  for (const file of files) {
+    const taskCard = createTaskCard(file);
+    taskList.prepend(taskCard);
+    uploadFile(file, taskCard);
+  }
+  fileInput.value = '';
+}
+
+function createTaskCard(file) {
+  const card = document.createElement('div');
+  card.className = 'task-card';
+  card.innerHTML = `
+    <div class="name">${file.name}</div>
+    <div class="progress-bar"><div class="fill" style="width:0%"></div></div>
+    <div class="badge uploading">上传中</div>
+    <div class="logs"></div>
+  `;
+  return card;
+}
+
+async function uploadFile(file, card) {
+  const formData = new FormData();
+  formData.append('files', file);
+  try {
+    const resp = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (data.code === 200 && data.task_ids?.length > 0) {
+      pollStatus(data.task_ids[0], card);
+    }
+  } catch (e) {
+    updateBadge(card, 'failed', '失败');
+  }
+}
+
+function pollStatus(taskId, card) {
+  updateBadge(card, 'processing', '处理中');
+  const fill = card.querySelector('.fill');
+  fill.style.width = '30%';
+
+  const interval = setInterval(async () => {
+    try {
+      const resp = await fetch(STATUS_URL + taskId);
+      const data = await resp.json();
+      const logs = card.querySelector('.logs');
+
+      if (data.done_list?.length > 0) {
+        logs.style.display = 'block';
+        logs.innerHTML = '';
+        for (const node of data.done_list) {
+          logs.innerHTML += `<div class="log-item"><span class="done">✓</span> ${node}</div>`;
+        }
+        for (const node of (data.running_list || [])) {
+          logs.innerHTML += `<div class="log-item"><span class="running">⟳</span> ${node}</div>`;
+        }
+      }
+
+      if (data.status === 'completed') {
+        clearInterval(interval);
+        fill.style.width = '100%';
+        updateBadge(card, 'completed', '已完成');
+      } else if (data.status === 'failed') {
+        clearInterval(interval);
+        updateBadge(card, 'failed', '失败');
+      } else {
+        const progress = Math.min(30 + (data.done_list?.length || 0) * 10, 90);
+        fill.style.width = progress + '%';
+      }
+    } catch (e) {
+      clearInterval(interval);
+      updateBadge(card, 'failed', '失败');
+    }
+  }, 2000);
+}
+
+function updateBadge(card, cls, text) {
+  const badge = card.querySelector('.badge');
+  badge.className = 'badge ' + cls;
+  badge.textContent = text;
+}
+</script>
+</body>
+</html>

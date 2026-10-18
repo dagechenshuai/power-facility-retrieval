@@ -1,0 +1,32 @@
+[project]
+name = "power-facility-retrieval"
+version = "0.1.0"
+description = "电力设施智能检索平台"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv",
+    "numpy",
+    "langgraph",
+    "fastapi",
+    "uvicorn[standard]",
+    "minio",
+    "langchain-openai",
+    "langchain",
+    "langchain-text-splitters",
+    "pymongo",
+    "colorlog",
+    "pymilvus>=3.0.0",
+    "flagembedding>=1.4.0",
+    "torch==2.5.1",
+    "httpx",
+    "requests",
+    "langgraph-checkpoint-sqlite",
+    "openai-agents",
+    "jieba",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+pythonpath = ["."]
