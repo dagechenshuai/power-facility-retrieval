@@ -1,12 +1,41 @@
 # 电力设施智能检索平台
 
-面向电力技术文档、图片和三维场景查询，提供文档导入（8002）和智能查询（8003）两个 FastAPI 服务。
+面向电力设施技术文档、图纸图片和三维场景的检索问答服务。系统将文档知识与场景业务数据接入同一条查询链路，支持多路检索、证据检查、流式回答和任务恢复。
 
-查询通过模型选择检索工具，融合向量、BM25、HyDE、业务接口或联网资料。重排后，模型根据证据选择回答、补查、追问或停止；最多执行两轮检索。代码使用 LangGraph Checkpoint 保存节点状态，用 SQLite 事件日志支持 SSE 重放。
+我主要参与问答链路、多模态知识库和 Java 接口联调。本仓库集中展示 Python 侧的文档导入、检索编排及任务管理；三维场景数据通过外部 Java 服务获取。
 
-## 先运行一个本地示例
+## 业务与实现
 
-需要 Python 3.12 和 uv，在仓库根目录执行：
+技术资料查询经常同时包含设备型号、专业术语和自然语言描述，单一路径容易漏掉相关内容。检索层保留语义、关键词和查询扩展三类能力，由模型按问题选择工具；涉及场景状态或外部信息时，再调用对应业务接口或联网工具。
+
+| 环节 | 实现 | 设计考虑 |
+| --- | --- | --- |
+| 文档处理 | MinerU 解析 PDF，视觉模型描述图片，MinIO 保存原图 | 将文字和图片说明纳入可检索内容，保留原图入口 |
+| 文档组织 | 父子分块，子块召回后回取父块 | 在匹配粒度与上下文完整性之间取舍 |
+| 多路检索 | BGE-M3、SQLite FTS5 BM25、HyDE | 分别处理语义匹配、型号术语和表达差异 |
+| 结果融合 | RRF 融合，重排接口评分，动态截断 | 先按排名融合，避免直接比较不同检索器的分数 |
+| 查询决策 | LangGraph 编排，模型选择工具并检查检索证据 | 根据实际结果补查、追问或结束，最多两轮 |
+| 任务恢复 | SQLite Checkpoint 与持久事件日志 | 分开处理节点恢复和客户端断线补发 |
+
+## 查询流程
+
+```mermaid
+flowchart LR
+    A[问题与会话历史] --> B[设施确认与查询改写]
+    B --> C[模型选择工具及参数]
+    C --> D[并行检索]
+    D --> E[RRF 与重排]
+    E --> F[模型检查证据]
+    F -->|补查，最多两轮| C
+    F -->|证据充分| G[生成回答]
+    F -->|需要澄清或无法完成| H[返回问题与任务状态]
+```
+
+每轮记录工具查询参数、返回内容摘要和后续决策。并行节点只提交本节点更新的字段；BM25 与向量检索使用相同的父块标识，保证同一文档能够参与融合去重。具体说明见 [查询设计](docs/standards/query-decisions.md)。
+
+## 快速开始
+
+环境：Python 3.12、uv。在仓库根目录执行：
 
 ```powershell
 uv sync --locked
@@ -14,47 +43,60 @@ uv run python -m evaluation.demo
 uv run pytest -q
 ```
 
-示例使用 `examples/demo-documents.json` 中的合成资料，真实执行 BM25 入库和父块检索，不需要 API Key、GPU 或数据库服务。输出示例见 `examples/demo-output.json`。它只验证本地检索，不包含真实模型决策，也不能用于证明企业数据上的效果指标。
+本地示例使用合成资料，执行真实的 BM25 入库、检索和父块返回，无需配置模型或外部数据库。输入位于 `examples/demo-documents.json`，已归档输出位于 `examples/demo-output.json`。该入口用于检查本地检索链路；完整模型问答需要以下服务配置。
 
-## 完整服务运行
+## 启动完整服务
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-填写配置并准备依赖。完整启动步骤、各服务职责和请求示例见 [运行说明](docs/standards/running.md)。分别在两个终端启动：
+按 [运行说明](docs/standards/running.md) 配置模型、Milvus、MongoDB 和对象存储等依赖，再分别在两个终端启动：
 
 ```powershell
 uv run uvicorn web.api.import_service:app --host 127.0.0.1 --port 8002
 uv run uvicorn web.api.query_service:app --host 127.0.0.1 --port 8003
 ```
 
-浏览器访问 `http://127.0.0.1:8002` 导入资料，访问 `http://127.0.0.1:8003` 查询。当前内置页面适合本地无鉴权演示；配置 `AGENT_API_KEY` 后请通过支持鉴权请求头的 API 客户端调用。
+- 文档导入页面：`http://127.0.0.1:8002`
+- 查询页面：`http://127.0.0.1:8003`
 
-## 状态与恢复
+内置页面用于本地演示。启用 `AGENT_API_KEY` 后，通过支持鉴权请求头的 API 客户端调用。
 
-`POST /query` 设置 `is_stream=true` 后取得 `task_id`，通过 `GET /stream/{task_id}` 接收 `ready`、`delta`、`final`、`error` 事件。`ready.reset=true` 表示新一轮答案开始，客户端需清空旧的部分答案；`final.answer` 是最终完整文本。
+## 接口与任务状态
 
-- `Last-Event-ID` 控制断线重放，每个订阅者独立读取持久日志。
-- `GET /tasks/{task_id}` 返回任务状态、结果和决策记录。
-- `POST /tasks/{task_id}/resume` 恢复失败或中断任务。
-- 非流式执行失败返回 HTTP 502；空答案不会记为成功。
-- `status` 表示执行状态；`result_status` 表示证据判断，例如 `answered`、`needs_clarification`、`insufficient_evidence`、`incomplete`。
+| 接口 | 用途 |
+| --- | --- |
+| `POST /query` | 提交问题；`is_stream=true` 返回任务 ID |
+| `GET /stream/{task_id}` | 接收流式回答，支持 `Last-Event-ID` 重放 |
+| `GET /tasks/{task_id}` | 查看执行状态、结果及决策记录 |
+| `POST /tasks/{task_id}/resume` | 恢复失败或中断任务 |
 
-当前建议每个服务只运行一个 worker。节点检查点不等于外部副作用恰好执行一次，恢复时可能重新调用模型或业务接口；多 worker 抢占、任务租约和完整进程崩溃实验仍待验证。`/ready` 当前只检查 SQLite，不代表其他依赖已就绪。
+执行状态与回答状态分开表示：`status` 描述任务执行，`result_status` 描述证据判断，包括 `answered`、`needs_clarification`、`insufficient_evidence` 和 `incomplete`。非流式执行失败返回 HTTP 502，空答案记为失败。
 
-## 验证材料
+SSE 的 `ready.reset=true` 表示开始生成新一轮答案，客户端清空旧的部分文本；`final.answer` 为最终完整答案。各订阅者使用独立游标读取事件，避免多页面连接相互消费消息。
 
-- [评测和证据边界](docs/evaluation.md)：已有自动化验证、历史指标需要的证据及未验证事项。
-- [故障修复说明](docs/fix/query-reliability.md)：失败状态、SSE、并行状态合并及上下文预算。
-- [查询决策设计](docs/standards/query-decisions.md)：工具参数、决策循环、上限与当前限制。
-- `examples/tests.xml`：本次实际生成的 pytest 报告。
+## 测试与评测
 
-运行真实 RAG 评测前，需要自行准备脱敏知识库及人工标注的 `evaluation/golden.jsonl`：
+当前归档回归结果为 **31 项通过，0 失败、0 跳过**。测试覆盖工具参数传递、并行状态合并、检索补查及上限、接口失败、SSE 多订阅和检查点恢复。报告见 `examples/tests.xml`。
+
+真实检索评测使用人工标注数据集：
 
 ```powershell
 uv run python -m evaluation.live_rag_eval evaluation/golden.jsonl --k 10 --output evaluation/result.jsonl
 uv run python -m evaluation.rag_evaluator evaluation/result.jsonl --k 10
 ```
 
-`evaluation/dataset.example.jsonl` 只是格式说明。公开仓库尚未提供简历历史指标的原始逐题记录，因此这里不将测试通过率解释为真实检索准确率。
+仓库提供数据格式和执行脚本；企业标注集与逐题结果未包含在公开版本中。指标定义、测试范围和复现要求见 [评测说明](docs/evaluation.md)。
+
+## 部署范围
+
+当前采用单 worker 服务和本地 SQLite 持久化。检查点支持节点级恢复，外部调用仍可能重试；多 worker 任务协调、用户级数据隔离及逐句引用校验尚未实现。`/ready` 只检查状态库。完整企业环境、负载与真实模型质量需要独立验收。
+
+## 文档索引
+
+- [运行与依赖配置](docs/standards/running.md)
+- [查询决策与设计取舍](docs/standards/query-decisions.md)
+- [测试和评测口径](docs/evaluation.md)
+- [可靠性修复记录](docs/fix/query-reliability.md)
+- [版本验证与维护记录](docs/plans/query-reliability-progress.md)
