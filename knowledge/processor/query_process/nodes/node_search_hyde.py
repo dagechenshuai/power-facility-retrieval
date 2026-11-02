@@ -4,13 +4,19 @@ import logging
 
 from knowledge.configs.milvus_config import milvus_config
 from knowledge.processor.query_process.base import NodeBase
+from knowledge.processor.query_process.nodes.node_search_embedding import (
+    NodeSearchEmbedding,
+)
 from knowledge.processor.query_process.state import QueryGraphState
+from knowledge.processor.query_process.tool_arguments import tool_query
 from knowledge.utils.embedding_utils import generate_embeddings
-from knowledge.utils.hybrid_search_utils import create_hybrid_search_requests, hybrid_search
+from knowledge.utils.hybrid_search_utils import (
+    create_hybrid_search_requests,
+    hybrid_search,
+)
 from knowledge.utils.llm_utils import get_llm_client
 from knowledge.utils.milvus_utils import get_milvus_client
 from knowledge.utils.prompt_utils import load_prompt
-from knowledge.processor.query_process.nodes.node_search_embedding import NodeSearchEmbedding
 
 
 class NodeSearchEmbeddingHyde(NodeBase):
@@ -19,7 +25,7 @@ class NodeSearchEmbeddingHyde(NodeBase):
     name = "node_search_embedding_hyde"
 
     def process(self, state: QueryGraphState):
-        rewritten_query = state.get("rewritten_query", "")
+        rewritten_query = tool_query(state, "hyde_search")
         facility_names = state.get("facility_names", [])
 
         try:
@@ -47,7 +53,9 @@ class NodeSearchEmbeddingHyde(NodeBase):
         self.logger.info(f"假设文档已生成 ({len(hyde_doc)} 字)")
         return hyde_doc
 
-    def _step_2_search_hyde(self, rewritten_query: str, hyde_doc: str, facility_names=None):
+    def _step_2_search_hyde(
+        self, rewritten_query: str, hyde_doc: str, facility_names=None
+    ):
         """问题 + 假设答案 → 向量 → Milvus 混合检索"""
         combined_text = f"{rewritten_query} {hyde_doc}"
         embeddings = generate_embeddings([combined_text])
@@ -63,9 +71,18 @@ class NodeSearchEmbeddingHyde(NodeBase):
         )
         client = get_milvus_client()
         res = hybrid_search(
-            client=client, collection_name=milvus_config.chunks_collection,
-            reqs=reqs, ranker_weights=(0.8, 0.2),
-            output_fields=["chunk_id", "content", "facility_name", "title", "parent_id", "parent_content"]
+            client=client,
+            collection_name=milvus_config.chunks_collection,
+            reqs=reqs,
+            ranker_weights=(0.8, 0.2),
+            output_fields=[
+                "chunk_id",
+                "content",
+                "facility_name",
+                "title",
+                "parent_id",
+                "parent_content",
+            ],
         )
 
         search_results = res[0] if res else []

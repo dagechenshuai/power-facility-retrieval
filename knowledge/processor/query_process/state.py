@@ -1,7 +1,7 @@
 """查询流程状态类型定义"""
 
-from typing import TypedDict, List, Annotated
 import operator
+from typing import Annotated, List, TypedDict
 
 
 def _keep_latest(x, y):
@@ -25,18 +25,18 @@ class QueryGraphState(TypedDict, total=False):
     facility_names: Annotated[List[str], _keep_latest]
 
     # 各路检索结果
-    embedding_chunks: Annotated[list, _keep_latest]       # 向量检索结果
-    hyde_embedding_chunks: Annotated[list, _keep_latest]   # HyDE 检索结果
+    embedding_chunks: Annotated[list, _keep_latest]  # 向量检索结果
+    hyde_embedding_chunks: Annotated[list, _keep_latest]  # HyDE 检索结果
     bm25_chunks: Annotated[list, _keep_latest]
-    backend_api_data: Annotated[list, _keep_latest]        # Spring Boot API 查询结果
-    web_search_docs: Annotated[list, _keep_latest]          # MCP 网络搜索结果
+    backend_api_data: Annotated[list, _keep_latest]  # Spring Boot API 查询结果
+    web_search_docs: Annotated[list, _keep_latest]  # MCP 网络搜索结果
 
     # HyDE 假设文档
     hyde_doc: Annotated[str, _keep_latest]
 
     # 融合与重排
-    rrf_chunks: Annotated[list, _keep_latest]               # RRF 融合后
-    reranked_docs: Annotated[list, _keep_latest]            # Rerank 精排后
+    rrf_chunks: Annotated[list, _keep_latest]  # RRF 融合后
+    reranked_docs: Annotated[list, _keep_latest]  # Rerank 精排后
 
     # 最终输出
     prompt: Annotated[str, _keep_latest]
@@ -48,3 +48,9 @@ class QueryGraphState(TypedDict, total=False):
     # 控制标志
     is_stream: Annotated[bool, _keep_latest]
     selected_tools: Annotated[List[str], _keep_latest]
+
+    tool_queries: Annotated[dict, _keep_latest]
+    retrieval_round: Annotated[int, _keep_latest]
+    next_action: Annotated[str, _keep_latest]
+    result_status: Annotated[str, _keep_latest]
+    decision_trace: Annotated[list, _keep_latest]

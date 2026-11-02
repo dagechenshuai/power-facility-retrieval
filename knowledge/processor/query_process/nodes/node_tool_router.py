@@ -49,13 +49,40 @@ class NodeToolRouter(NodeBase):
             "模型、场景、坐标选scene_search；只有最新外部信息才选web_search。"
         )
         try:
-            response = get_llm_client().bind_tools(self.tools, tool_choice="auto").invoke(
-                [("system", prompt), ("human", query)]
+            response = (
+                get_llm_client()
+                .bind_tools(self.tools, tool_choice="auto")
+                .invoke([("system", prompt), ("human", query)])
             )
             allowed = {tool.name for tool in self.tools}
-            selected = [call["name"] for call in response.tool_calls if call["name"] in allowed]
+            queries = {}
+            for call in response.tool_calls:
+                name = call["name"]
+                value = call.get("args", {}).get("query", query)
+                if name in allowed and isinstance(value, str) and value.strip():
+                    queries[name] = value.strip()[:4000]
+            selected = list(queries)
         except Exception as exc:
             self.logger.warning("模型工具路由失败，降级为本地混合检索: %s", exc)
             selected = ["vector_search", "bm25_search"]
-        state["selected_tools"] = list(dict.fromkeys(selected)) or ["vector_search", "bm25_search"]
+            queries = {name: query for name in selected}
+        state["selected_tools"] = list(dict.fromkeys(selected)) or [
+            "vector_search",
+            "bm25_search",
+        ]
+        state["tool_queries"] = queries or {
+            name: query for name in state["selected_tools"]
+        }
+        state["retrieval_round"] = state.get("retrieval_round", 0) + 1
+        # 每轮只融合本轮工具返回的证据，旧证据保留在决策记录中。
+        for key in (
+            "embedding_chunks",
+            "hyde_embedding_chunks",
+            "bm25_chunks",
+            "backend_api_data",
+            "web_search_docs",
+            "rrf_chunks",
+            "reranked_docs",
+        ):
+            state[key] = []
         return state

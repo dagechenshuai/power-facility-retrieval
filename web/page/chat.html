@@ -127,6 +127,9 @@ function consumeStream(taskId) {
   const source = new EventSource(STREAM_URL + encodeURIComponent(taskId));
   let answer = '';
 
+  source.addEventListener('ready', event => {
+    if (JSON.parse(event.data).reset) { answer = ''; bubble.textContent = ''; }
+  });
   source.addEventListener('delta', event => {
     const data = JSON.parse(event.data);
     answer += data.delta || '';
@@ -136,7 +139,7 @@ function consumeStream(taskId) {
 
   source.addEventListener('final', event => {
     const data = JSON.parse(event.data);
-    if (!answer) answer = data.answer || '未生成答案，请重试。';
+    answer = data.answer || answer || '未生成答案，请重试。';
     bubble.textContent = answer;
     source.close();
     sendBtn.disabled = false;

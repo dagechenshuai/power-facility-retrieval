@@ -1,0 +1,27 @@
+{
+  "mode": "local_retrieval_only",
+  "boundary": "�ϳ����ϣ�����ʾBM25�͸��鷵�أ���֤����ʵģ�;��߻���ҵ����ָ�ꡣ",
+  "query": "���ҶƬ����¼",
+  "results": [
+    {
+      "chunk_id": "parent:demo-blade",
+      "parent_id": "demo-blade",
+      "file_title": "synthetic-demo",
+      "facility_name": "��ʾ���",
+      "title": "�ϳ�ҶƬ����¼˵��",
+      "content": "���ϳ���ʾ���ϣ����������ֳ���ҵ�����ҶƬ����¼Ӧ�����豸��š�������ڡ����ֵ�����͸��˽���������ϲ��涨������ڡ�",
+      "source": "bm25",
+      "score": 6.2762058124376954e-06
+    },
+    {
+      "chunk_id": "parent:demo-transformer",
+      "parent_id": "demo-transformer",
+      "file_title": "synthetic-demo",
+      "facility_name": "��ʾ��ѹ��",
+      "title": "�ϳ�̨��˵��",
+      "content": "���ϳ���ʾ���ϣ����������ֳ���ҵ����ѹ��̨�˼�¼�豸��ź�ά����¼��",
+      "source": "bm25",
+      "score": 1.5052631578947369e-06
+    }
+  ]
+}

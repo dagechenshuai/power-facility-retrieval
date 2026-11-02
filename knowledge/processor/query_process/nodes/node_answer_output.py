@@ -1,15 +1,15 @@
 """答案生成节点：组装 Prompt → LLM 生成最终回答 → 写入历史"""
 
-import re
 import logging
-from typing import List, Dict, Tuple
+import re
+from typing import Dict, List, Tuple
 
 from knowledge.processor.query_process.base import NodeBase
 from knowledge.processor.query_process.state import QueryGraphState
 from knowledge.utils.llm_utils import get_llm_client
 from knowledge.utils.mongo_history_utils import save_chat_message
 from knowledge.utils.prompt_utils import load_prompt
-from knowledge.utils.sse_utils import push_to_session, SSEEvent
+from knowledge.utils.sse_utils import SSEEvent, push_to_session
 
 MAX_CONTEXT_CHARS = 12000  # 上下文最大字符数
 
@@ -65,16 +65,19 @@ class NodeAnswerOutput(NodeBase):
 
         facility_str = ", ".join(facility_names) if facility_names else "未指定设施"
 
-        prompt = load_prompt("answer",
+        prompt = load_prompt(
+            "answer",
             context=context_str or "无参考内容",
             history=history_str or "暂无历史对话",
             facility_names=facility_str,
-            question=question
+            question=question,
         )
         self.logger.info(f"Prompt 构建完成，长度: {len(prompt)}")
         return prompt
 
-    def _format_reranked_docs(self, docs: List[Dict], char_budget: int) -> Tuple[str, int]:
+    def _format_reranked_docs(
+        self, docs: List[Dict], char_budget: int
+    ) -> Tuple[str, int]:
         """格式化重排序文档，带字符预算"""
         lines = []
         used = 0
@@ -90,13 +93,18 @@ class NodeAnswerOutput(NodeBase):
                 meta.append(f"[score={float(score):.4f}]")
 
             entry = " ".join(meta) + "\n" + content
-            if used + len(entry) > char_budget:
+            remaining = char_budget - used - 2
+            if remaining <= 0:
                 break
+            if len(entry) > remaining:
+                entry = entry[: max(0, remaining - 6)] + "[已截断]"
             lines.append(entry)
             used += len(entry) + 2
         return "\n\n".join(lines), char_budget - used
 
-    def _format_chat_history(self, history: List[Dict], char_budget: int) -> Tuple[str, int]:
+    def _format_chat_history(
+        self, history: List[Dict], char_budget: int
+    ) -> Tuple[str, int]:
         """格式化对话历史"""
         lines = []
         used = 0
@@ -120,6 +128,11 @@ class NodeAnswerOutput(NodeBase):
         try:
             llm = get_llm_client()
             if state.get("is_stream"):
+                push_to_session(
+                    state.get("task_id", state.get("session_id", "default")),
+                    SSEEvent.READY,
+                    {"reset": True},
+                )
                 final_text = ""
                 for chunk in llm.stream(prompt):
                     delta = getattr(chunk, "content", "") or ""
@@ -151,11 +164,13 @@ class NodeAnswerOutput(NodeBase):
         if not docs:
             return images
 
-        md_img_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
+        md_img_pattern = re.compile(r"!\[.*?\]\((.*?)\)")
 
         for doc in docs:
             url = (doc.get("url") or "").strip()
-            if url and url.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
+            if url and url.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+            ):
                 if url not in seen:
                     seen.add(url)
                     images.append(url)

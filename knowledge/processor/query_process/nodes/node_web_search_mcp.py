@@ -9,6 +9,7 @@ from agents.mcp import MCPServerStreamableHttp
 from knowledge.configs.mcp_config import mcp_config
 from knowledge.processor.query_process.base import NodeBase
 from knowledge.processor.query_process.state import QueryGraphState
+from knowledge.processor.query_process.tool_arguments import tool_query
 
 
 class NodeWebSearchMcp(NodeBase):
@@ -17,7 +18,7 @@ class NodeWebSearchMcp(NodeBase):
     name = "node_web_search_mcp"
 
     def process(self, state: QueryGraphState):
-        query = state.get("rewritten_query", "")
+        query = tool_query(state, "web_search")
         docs = []
 
         if query:
