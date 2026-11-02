@@ -5,8 +5,12 @@ import logging
 from knowledge.configs.milvus_config import milvus_config
 from knowledge.processor.query_process.base import NodeBase
 from knowledge.processor.query_process.state import QueryGraphState
+from knowledge.processor.query_process.tool_arguments import tool_query
 from knowledge.utils.embedding_utils import generate_embeddings
-from knowledge.utils.hybrid_search_utils import create_hybrid_search_requests, hybrid_search
+from knowledge.utils.hybrid_search_utils import (
+    create_hybrid_search_requests,
+    hybrid_search,
+)
 from knowledge.utils.milvus_utils import get_milvus_client
 
 
@@ -17,7 +21,7 @@ class NodeSearchEmbedding(NodeBase):
 
     def process(self, state: QueryGraphState):
         try:
-            query = state.get("rewritten_query", "")
+            query = tool_query(state, "vector_search")
             facility_names = state.get("facility_names", [])
 
             # 生成向量
@@ -35,10 +39,7 @@ class NodeSearchEmbedding(NodeBase):
 
             # 混合搜索
             reqs = create_hybrid_search_requests(
-                dense_vector=dense_vec,
-                sparse_vector=sparse_vec,
-                expr=expr,
-                limit=10
+                dense_vector=dense_vec, sparse_vector=sparse_vec, expr=expr, limit=10
             )
 
             self.logger.info("开始执行 Milvus 混合检索...")
@@ -48,7 +49,15 @@ class NodeSearchEmbedding(NodeBase):
                 collection_name=milvus_config.chunks_collection,
                 reqs=reqs,
                 ranker_weights=(0.8, 0.2),
-                output_fields=["chunk_id", "content", "facility_name", "title", "file_title", "parent_id", "parent_content"]
+                output_fields=[
+                    "chunk_id",
+                    "content",
+                    "facility_name",
+                    "title",
+                    "file_title",
+                    "parent_id",
+                    "parent_content",
+                ],
             )
 
             search_results = res[0] if res else []
@@ -66,7 +75,14 @@ class NodeSearchEmbedding(NodeBase):
         for hit in results:
             entity = hit.get("entity", hit)
             parent_id = entity.get("parent_id") or str(entity.get("chunk_id", ""))
-            parents.setdefault(parent_id, {**entity, "chunk_id": f"parent:{parent_id}",
-                                           "content": entity.get("parent_content") or entity.get("content", ""),
-                                           "source": "parent_vector"})
+            parents.setdefault(
+                parent_id,
+                {
+                    **entity,
+                    "chunk_id": f"parent:{parent_id}",
+                    "content": entity.get("parent_content")
+                    or entity.get("content", ""),
+                    "source": "parent_vector",
+                },
+            )
         return list(parents.values())

@@ -11,18 +11,18 @@ _PATH = Path(os.getenv("BM25_DB_PATH", "./data/bm25.db")).resolve()
 _PATH.parent.mkdir(parents=True, exist_ok=True)
 _CONN = sqlite3.connect(_PATH, check_same_thread=False)
 _LOCK = threading.RLock()
-_CONN.execute(
-    """CREATE VIRTUAL TABLE IF NOT EXISTS bm25_chunks_v2 USING fts5(
+_CONN.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS bm25_chunks_v2 USING fts5(
     parent_id UNINDEXED, file_title UNINDEXED, facility_name UNINDEXED,
     title_raw UNINDEXED, content_raw UNINDEXED, title_tokens, content_tokens,
     tokenize='unicode61'
-)"""
-)
+)""")
 
 
 def _tokenize(text: str) -> str:
     """使用结巴切词后交给 FTS5，避免中文整句被视作单一词项。"""
-    return " ".join(token.strip().lower() for token in jieba.lcut(text or "") if token.strip())
+    return " ".join(
+        token.strip().lower() for token in jieba.lcut(text or "") if token.strip()
+    )
 
 
 def replace_document(file_title: str, chunks: list[dict]) -> None:
@@ -36,18 +36,28 @@ def replace_document(file_title: str, chunks: list[dict]) -> None:
             """INSERT INTO bm25_chunks_v2(
                 parent_id,file_title,facility_name,title_raw,content_raw,title_tokens,content_tokens
             ) VALUES(?,?,?,?,?,?,?)""",
-            [(
-                item.get("parent_id", ""), file_title, item.get("facility_name", ""),
-                item.get("title", ""), item.get("parent_content") or item.get("content", ""),
-                _tokenize(item.get("title", "")),
-                _tokenize(item.get("parent_content") or item.get("content", "")),
-            ) for item in parents.values()],
+            [
+                (
+                    item.get("parent_id", ""),
+                    file_title,
+                    item.get("facility_name", ""),
+                    item.get("title", ""),
+                    item.get("parent_content") or item.get("content", ""),
+                    _tokenize(item.get("title", "")),
+                    _tokenize(item.get("parent_content") or item.get("content", "")),
+                )
+                for item in parents.values()
+            ],
         )
         _CONN.commit()
 
 
-def search_bm25(query: str, facility_names: list[str] | None = None, limit: int = 10) -> list[dict]:
-    terms = list(dict.fromkeys(term.replace('"', '') for term in _tokenize(query).split()))
+def search_bm25(
+    query: str, facility_names: list[str] | None = None, limit: int = 10
+) -> list[dict]:
+    terms = list(
+        dict.fromkeys(term.replace('"', "") for term in _tokenize(query).split())
+    )
     if not terms:
         return []
     match = " OR ".join(f'"{term}"' for term in terms)
@@ -63,8 +73,15 @@ def search_bm25(query: str, facility_names: list[str] | None = None, limit: int 
     with _LOCK:
         rows = _CONN.execute(sql, params).fetchall()
     return [
-        {"chunk_id": f"bm25:{row[0]}", "parent_id": row[0], "file_title": row[1],
-         "facility_name": row[2], "title": row[3], "content": row[4], "source": "bm25",
-         "score": float(-row[5])}
+        {
+            "chunk_id": f"parent:{row[0]}",
+            "parent_id": row[0],
+            "file_title": row[1],
+            "facility_name": row[2],
+            "title": row[3],
+            "content": row[4],
+            "source": "bm25",
+            "score": float(-row[5]),
+        }
         for row in rows
     ]

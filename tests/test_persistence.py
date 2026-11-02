@@ -32,7 +32,10 @@ def test_sse_replays_persisted_token_events():
     persistence.append_event(task_id, sse_utils.SSEEvent.FINAL, {"answer": "逐词"})
 
     async def collect():
-        return [event async for event in sse_utils.sse_generator(task_id, ConnectedRequest())]
+        return [
+            event
+            async for event in sse_utils.sse_generator(task_id, ConnectedRequest())
+        ]
 
     events = asyncio.run(collect())
     assert sum("event: delta" in event for event in events) == 2
@@ -59,15 +62,19 @@ def test_langgraph_checkpoint_can_resume_after_interrupt():
 def test_background_thread_can_push_live_sse_tokens():
     async def collect():
         task_id = f"pytest-live-{uuid.uuid4()}"
-        sse_utils.create_sse_queue(task_id)
 
         def produce():
             sse_utils.push_to_session(task_id, sse_utils.SSEEvent.DELTA, {"delta": "A"})
-            sse_utils.push_to_session(task_id, sse_utils.SSEEvent.FINAL, {"answer": "A"})
+            sse_utils.push_to_session(
+                task_id, sse_utils.SSEEvent.FINAL, {"answer": "A"}
+            )
 
         thread = threading.Thread(target=produce)
         thread.start()
-        events = [event async for event in sse_utils.sse_generator(task_id, ConnectedRequest())]
+        events = [
+            event
+            async for event in sse_utils.sse_generator(task_id, ConnectedRequest())
+        ]
         thread.join()
         return events
 

@@ -1,0 +1,14 @@
+[
+  {
+    "parent_id": "demo-blade",
+    "facility_name": "演示风机",
+    "title": "合成叶片检查记录说明",
+    "parent_content": "【合成演示资料，不能用于现场作业】风机叶片检查记录应包含设备编号、检查日期、发现的问题和复核结果。本资料不规定检查周期。"
+  },
+  {
+    "parent_id": "demo-transformer",
+    "facility_name": "演示变压器",
+    "title": "合成台账说明",
+    "parent_content": "【合成演示资料，不能用于现场作业】变压器台账记录设备编号和维护记录。"
+  }
+]

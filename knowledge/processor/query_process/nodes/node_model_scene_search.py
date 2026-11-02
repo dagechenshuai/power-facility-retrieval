@@ -1,10 +1,11 @@
 """模型/场景检索节点：调用 Spring Boot API 获取实时模型和场景数据"""
 
 import logging
-from typing import List, Dict
+from typing import Dict, List
 
 from knowledge.processor.query_process.base import NodeBase
 from knowledge.processor.query_process.state import QueryGraphState
+from knowledge.processor.query_process.tool_arguments import tool_query
 from knowledge.utils.springboot_client import get_springboot_client
 
 
@@ -22,7 +23,7 @@ class NodeModelSceneSearch(NodeBase):
     name = "node_model_scene_search"
 
     def process(self, state: QueryGraphState):
-        query = state.get("rewritten_query", "")
+        query = tool_query(state, "scene_search")
         facility_names = state.get("facility_names", [])
         results = []
 
@@ -55,7 +56,18 @@ class NodeModelSceneSearch(NodeBase):
         return state
 
     def _should_search_models(self, query_lower: str) -> bool:
-        keywords = ["模型", "model", "glb", "fbx", "风机", "变电站", "设备", "变压器", "3d", "三维"]
+        keywords = [
+            "模型",
+            "model",
+            "glb",
+            "fbx",
+            "风机",
+            "变电站",
+            "设备",
+            "变压器",
+            "3d",
+            "三维",
+        ]
         return any(kw in query_lower for kw in keywords)
 
     def _should_search_scenes(self, query_lower: str) -> bool:
@@ -63,10 +75,25 @@ class NodeModelSceneSearch(NodeBase):
         return any(kw in query_lower for kw in keywords)
 
     def _should_search_geo(self, query_lower: str) -> bool:
-        keywords = ["地形", "影像", "坐标", "经纬度", "高度", "海拔", "地理", "dem", "terrain", "imagery", "geo", "位置"]
+        keywords = [
+            "地形",
+            "影像",
+            "坐标",
+            "经纬度",
+            "高度",
+            "海拔",
+            "地理",
+            "dem",
+            "terrain",
+            "imagery",
+            "geo",
+            "位置",
+        ]
         return any(kw in query_lower for kw in keywords)
 
-    def _search_models(self, client, facility_names: List[str], query: str) -> List[Dict]:
+    def _search_models(
+        self, client, facility_names: List[str], query: str
+    ) -> List[Dict]:
         """搜索模型数据"""
         results = []
         try:
@@ -76,7 +103,9 @@ class NodeModelSceneSearch(NodeBase):
             self.logger.info(f"获取到 {len(items)} 个带坐标的模型")
 
             # 如果有设施名，过滤匹配的
-            relevant_items = self._filter_by_keywords(items, facility_names, ["name", "type"], max_results=5)
+            relevant_items = self._filter_by_keywords(
+                items, facility_names, ["name", "type"], max_results=5
+            )
             for item in relevant_items:
                 coord_str = ""
                 if item.get("longitude") and item.get("latitude"):
@@ -84,18 +113,22 @@ class NodeModelSceneSearch(NodeBase):
                     if item.get("height"):
                         coord_str += f", 高度: {item['height']}m"
                     coord_str += "）"
-                results.append({
-                    "content": f"3D模型「{item.get('name', '')}」类型: {item.get('type', '')}{coord_str}",
-                    "title": f"模型: {item.get('name', '')}",
-                    "chunk_id": item.get("id", ""),
-                    "source": "backend_model",
-                })
+                results.append(
+                    {
+                        "content": f"3D模型「{item.get('name', '')}」类型: {item.get('type', '')}{coord_str}",
+                        "title": f"模型: {item.get('name', '')}",
+                        "chunk_id": item.get("id", ""),
+                        "source": "backend_model",
+                    }
+                )
         except Exception as e:
             self.logger.error(f"模型搜索失败: {e}")
 
         return results
 
-    def _search_scenes(self, client, facility_names: List[str], query: str) -> List[Dict]:
+    def _search_scenes(
+        self, client, facility_names: List[str], query: str
+    ) -> List[Dict]:
         """搜索场景数据"""
         results = []
         try:
@@ -108,16 +141,20 @@ class NodeModelSceneSearch(NodeBase):
 
             if isinstance(items, list):
                 self.logger.info(f"获取到 {len(items)} 个场景")
-                relevant = self._filter_by_keywords(items, facility_names, ["sceneName", "sceneId"], max_results=3)
+                relevant = self._filter_by_keywords(
+                    items, facility_names, ["sceneName", "sceneId"], max_results=3
+                )
                 for item in relevant:
                     name = item.get("sceneName", item.get("sceneId", ""))
                     created = item.get("createdAt", "")
-                    results.append({
-                        "content": f"已发布场景「{name}」创建时间: {created}",
-                        "title": f"场景: {name}",
-                        "chunk_id": item.get("sceneId", ""),
-                        "source": "backend_scene",
-                    })
+                    results.append(
+                        {
+                            "content": f"已发布场景「{name}」创建时间: {created}",
+                            "title": f"场景: {name}",
+                            "chunk_id": item.get("sceneId", ""),
+                            "source": "backend_scene",
+                        }
+                    )
         except Exception as e:
             self.logger.error(f"场景搜索失败: {e}")
 
@@ -135,15 +172,19 @@ class NodeModelSceneSearch(NodeBase):
                 items = geo_items.get("items", [])
 
             self.logger.info(f"获取到 {len(items)} 个地理数据项")
-            relevant = self._filter_by_keywords(items, facility_names, ["name", "description", "type"], max_results=3)
+            relevant = self._filter_by_keywords(
+                items, facility_names, ["name", "description", "type"], max_results=3
+            )
             for item in relevant:
-                results.append({
-                    "content": f"地理数据「{item.get('name', '')}」类型: {item.get('type', '')}, "
-                               f"子类型: {item.get('subType', '')}, 坐标系: {item.get('crs', '')}",
-                    "title": f"地理: {item.get('name', '')}",
-                    "chunk_id": item.get("id", ""),
-                    "source": "backend_geo",
-                })
+                results.append(
+                    {
+                        "content": f"地理数据「{item.get('name', '')}」类型: {item.get('type', '')}, "
+                        f"子类型: {item.get('subType', '')}, 坐标系: {item.get('crs', '')}",
+                        "title": f"地理: {item.get('name', '')}",
+                        "chunk_id": item.get("id", ""),
+                        "source": "backend_geo",
+                    }
+                )
         except Exception as e:
             self.logger.error(f"地理数据搜索失败: {e}")
 
@@ -155,18 +196,25 @@ class NodeModelSceneSearch(NodeBase):
         try:
             stats = client.get_scene_stats()
             if stats:
-                results.append({
-                    "content": f"系统概览：共 {stats.get('totalScenes', '?')} 个已发布场景，"
-                               f"总计 {stats.get('totalZipSize', '?')} 字节",
-                    "title": "系统概览",
-                    "source": "backend_overview",
-                })
+                results.append(
+                    {
+                        "content": f"系统概览：共 {stats.get('totalScenes', '?')} 个已发布场景，"
+                        f"总计 {stats.get('totalZipSize', '?')} 字节",
+                        "title": "系统概览",
+                        "source": "backend_overview",
+                    }
+                )
         except Exception:
             pass
         return results
 
-    def _filter_by_keywords(self, items: List[Dict], keywords: List[str],
-                             search_fields: List[str], max_results: int = 5) -> List[Dict]:
+    def _filter_by_keywords(
+        self,
+        items: List[Dict],
+        keywords: List[str],
+        search_fields: List[str],
+        max_results: int = 5,
+    ) -> List[Dict]:
         """按关键词过滤和排序"""
         if not keywords:
             return items[:max_results]

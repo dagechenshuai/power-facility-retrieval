@@ -30,3 +30,6 @@ dependencies = [
 testpaths = ["tests"]
 addopts = "--strict-markers"
 pythonpath = ["."]
+
+[tool.isort]
+profile = "black"

@@ -1,8 +1,9 @@
 """查询流程节点基类"""
 
-from abc import ABC, abstractmethod
-from typing import TypeVar
 import logging
+from abc import ABC, abstractmethod
+from copy import deepcopy
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -19,9 +20,14 @@ class NodeBase(ABC):
         """节点执行入口（LangGraph 调用）"""
         try:
             self.logger.info(f"--- {self.name} 开始 ---")
-            result = self.process(state)
+            before = deepcopy(state)
+            result = self.process(deepcopy(state))
             self.logger.info(f"--- {self.name} 完成 ---")
-            return result
+            return {
+                key: value
+                for key, value in result.items()
+                if key not in before or value != before[key]
+            }
         except Exception as e:
             self.logger.error(f"{self.name} 执行失败: {e}", exc_info=True)
             raise

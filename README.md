@@ -1,46 +1,60 @@
 # 电力设施智能检索平台
 
-本项目面向电力设施技术文档、三维模型场景和外部资料检索，包含文档导入（8002）和智能查询（8003）两个 FastAPI 服务。
+面向电力技术文档、图片和三维场景查询，提供文档导入（8002）和智能查询（8003）两个 FastAPI 服务。
 
-## 核心能力
+查询通过模型选择检索工具，融合向量、BM25、HyDE、业务接口或联网资料。重排后，模型根据证据选择回答、补查、追问或停止；最多执行两轮检索。代码使用 LangGraph Checkpoint 保存节点状态，用 SQLite 事件日志支持 SSE 重放。
 
-- **智能路由**：LangGraph 编排查询流程，由模型自主选择向量、BM25、HyDE、场景和联网检索工具。
-- **混合检索**：父子分块结合 BGE-M3、传统 BM25、RRF 与 Cross-Encoder，兼顾语义召回和精确关键词匹配。
-- **多模态入库**：MinerU 解析 PDF，视觉模型为图片生成中文描述，MinIO 保存原图并参与检索。
-- **流式恢复**：逐 Token SSE、事件持久化、断线补发和 LangGraph Checkpoint 支持任务恢复。
+## 先运行一个本地示例
 
-## 启动
+需要 Python 3.12 和 uv，在仓库根目录执行：
+
+```powershell
+uv sync --locked
+uv run python -m evaluation.demo
+uv run pytest -q
+```
+
+示例使用 `examples/demo-documents.json` 中的合成资料，真实执行 BM25 入库和父块检索，不需要 API Key、GPU 或数据库服务。输出示例见 `examples/demo-output.json`。它只验证本地检索，不包含真实模型决策，也不能用于证明企业数据上的效果指标。
+
+## 完整服务运行
 
 ```powershell
 Copy-Item .env.example .env
-uv sync
+```
+
+填写配置并准备依赖。完整启动步骤、各服务职责和请求示例见 [运行说明](docs/standards/running.md)。分别在两个终端启动：
+
+```powershell
 uv run uvicorn web.api.import_service:app --host 127.0.0.1 --port 8002
 uv run uvicorn web.api.query_service:app --host 127.0.0.1 --port 8003
 ```
 
-生产环境应设置 `AGENT_API_KEY`、明确的 `CORS_ORIGINS`，并把 `data/` 放在持久卷上。`/health` 用于存活探针，`/ready` 用于状态库就绪探针。
+浏览器访问 `http://127.0.0.1:8002` 导入资料，访问 `http://127.0.0.1:8003` 查询。当前内置页面适合本地无鉴权演示；配置 `AGENT_API_KEY` 后请通过支持鉴权请求头的 API 客户端调用。
 
-## 已实现的 Agent 能力
+## 状态与恢复
 
-- LLM `stream()` 产生的每个增量都会写入持久事件表并通过 SSE `delta` 事件即时推送；浏览器根据 SSE `id` 断线补发。
-- LangGraph 使用 SQLite Checkpoint，并以 `query:{task_id}`、`import:{task_id}` 隔离线程。重启后进行中的任务标记为 `interrupted`，调用 `POST /tasks/{task_id}/resume` 从检查点继续。
-- 文档按父章节生成稳定 `parent_id`，子块参加向量召回，命中后去重回取完整 `parent_content`。
-- SQLite FTS5 + jieba 构建独立的传统 BM25 索引，不把 BGE-M3 稀疏向量冒充 BM25。
-- 模型通过 `bind_tools(..., tool_choice='auto')` 自主选择向量、BM25、HyDE、场景或联网搜索，可多工具并行。
-- 本地图片在入库前逐张调用视觉模型生成中文描述；描述失败会使任务失败并保留恢复点，不会静默跳过。
+`POST /query` 设置 `is_stream=true` 后取得 `task_id`，通过 `GET /stream/{task_id}` 接收 `ready`、`delta`、`final`、`error` 事件。`ready.reset=true` 表示新一轮答案开始，客户端需清空旧的部分答案；`final.answer` 是最终完整文本。
 
-## 恢复与 SSE
+- `Last-Event-ID` 控制断线重放，每个订阅者独立读取持久日志。
+- `GET /tasks/{task_id}` 返回任务状态、结果和决策记录。
+- `POST /tasks/{task_id}/resume` 恢复失败或中断任务。
+- 非流式执行失败返回 HTTP 502；空答案不会记为成功。
+- `status` 表示执行状态；`result_status` 表示证据判断，例如 `answered`、`needs_clarification`、`insufficient_evidence`、`incomplete`。
 
-`POST /query` 使用 `is_stream=true` 后返回 `task_id`，客户端连接 `GET /stream/{task_id}`。事件类型为 `ready`、`delta`、`final`、`error`。查询和导入任务均可通过 `GET /tasks/{task_id}` 查看持久状态。
+当前建议每个服务只运行一个 worker。节点检查点不等于外部副作用恰好执行一次，恢复时可能重新调用模型或业务接口；多 worker 抢占、任务租约和完整进程崩溃实验仍待验证。`/ready` 当前只检查 SQLite，不代表其他依赖已就绪。
 
-## 自动化测试与评测
+## 验证材料
+
+- [评测和证据边界](docs/evaluation.md)：已有自动化验证、历史指标需要的证据及未验证事项。
+- [故障修复说明](docs/fix/query-reliability.md)：失败状态、SSE、并行状态合并及上下文预算。
+- [查询决策设计](docs/standards/query-decisions.md)：工具参数、决策循环、上限与当前限制。
+- `examples/tests.xml`：本次实际生成的 pytest 报告。
+
+运行真实 RAG 评测前，需要自行准备脱敏知识库及人工标注的 `evaluation/golden.jsonl`：
 
 ```powershell
-uv run pytest -q
-uv run python -m evaluation.rag_evaluator evaluation/result.jsonl
-uv run python -m evaluation.live_rag_eval evaluation/golden.jsonl --output evaluation/result.jsonl
+uv run python -m evaluation.live_rag_eval evaluation/golden.jsonl --k 10 --output evaluation/result.jsonl
+uv run python -m evaluation.rag_evaluator evaluation/result.jsonl --k 10
 ```
 
-单元回归覆盖 SSE 重放、任务状态落盘、Checkpoint 恢复、父子回取、BM25、RRF、Rerank、工具路由和图片描述。端到端评测输出 Recall@K、MRR、nDCG 和答案关键词覆盖率，任一指标低于阈值时进程返回非零退出码，可直接作为 CI 质量门禁。
-
-`evaluation/dataset.example.jsonl` 只是格式示例；上线前必须用实际知识库的父块 ID 建立并评审 `golden.jsonl`。
+`evaluation/dataset.example.jsonl` 只是格式说明。公开仓库尚未提供简历历史指标的原始逐题记录，因此这里不将测试通过率解释为真实检索准确率。
